@@ -11,6 +11,10 @@ const input = readFileSync('./input.txt', 'utf8')
 const offsetLeft = 1;
 // Gap between letters, in terminal cells.
 const letterGap = 1;
+// Output mode: quadrants (2x2 pixels per cell) by default, `--sextants` for 2x3 pixels per cell.
+const useSextants = process.argv.includes('--sextants');
+// Pixel rows covered by one terminal row.
+const cellHeight = useSextants ? 3 : 2;
 
 const letterData = {};
 
@@ -78,20 +82,35 @@ function render(tl, tr, bl, br) {
   }
 }
 
+// Sextant characters U+1FB00-1FB3B. Pixels are numbered 1-6 left to right, top to bottom,
+// and pixel n sets bit n-1. The block skips the patterns that already exist elsewhere:
+// empty, full, left half and right half.
+function renderSextant(bits) {
+  switch (bits) {
+    case 0:
+      return ' ';
+    case 0b010101:
+      return '▌';
+    case 0b101010:
+      return '▐';
+    case 0b111111:
+      return '█';
+  }
+  let index = bits - 1;
+  if (bits > 0b010101) index--;
+  if (bits > 0b101010) index--;
+  return String.fromCodePoint(0x1fb00 + index);
+}
+
 const letterHeight = Object.values(letterData).reduce(
   (acc, rows) => Math.max(acc, rows.length),
   0,
 );
-// Each terminal row shows two pixel rows, so round the height up to an even number.
-const pixelHeight = letterHeight + (letterHeight % 2);
+// Round the height up to a whole number of terminal rows.
+const pixelHeight = Math.ceil(letterHeight / cellHeight) * cellHeight;
 const spaceWidth = 6;
 
 function getGlyph(char) {
-  if (char === ' ') {
-    return new Array(pixelHeight)
-      .fill(null)
-      .map(() => new Array(spaceWidth).fill(false));
-  }
   const glyph =
     letterData[char] ??
     letterData[char.toUpperCase()] ??
@@ -115,22 +134,31 @@ function buildPixels(chars) {
       for (let x = 0; x < width; x++) pixels[y].push(row?.[x] ?? false);
     }
   });
-  // Pad to an even width so every terminal cell covers a full 2x2 block.
+  // Pad to an even width so every terminal cell covers a full block.
   if (pixels[0].length % 2) pixels.forEach((row) => row.push(false));
   return pixels;
 }
 
 function toBlocks(pixels) {
   const out = [];
-  for (let y = 0; y < pixels.length; y += 2) {
+  for (let y = 0; y < pixels.length; y += cellHeight) {
     let line = ' '.repeat(offsetLeft);
     for (let x = 0; x < pixels[y].length; x += 2) {
-      line += render(
-        pixels[y][x],
-        pixels[y][x + 1],
-        pixels[y + 1][x],
-        pixels[y + 1][x + 1],
-      );
+      if (useSextants) {
+        let bits = 0;
+        for (let dy = 0; dy < 3; dy++) {
+          if (pixels[y + dy][x]) bits |= 1 << (dy * 2);
+          if (pixels[y + dy][x + 1]) bits |= 1 << (dy * 2 + 1);
+        }
+        line += renderSextant(bits);
+      } else {
+        line += render(
+          pixels[y][x],
+          pixels[y][x + 1],
+          pixels[y + 1][x],
+          pixels[y + 1][x + 1],
+        );
+      }
     }
     out.push(line.trimEnd());
   }
